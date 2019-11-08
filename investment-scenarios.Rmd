@@ -1,0 +1,202 @@
+---
+title: "Investment scenarios"
+author: "Vlad Tarko"
+output: 
+  flexdashboard::flex_dashboard:
+    orientation: rows
+runtime: shiny
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(scales)
+library(manipulateWidget)
+library(plotly)
+
+theme_set(ggthemes::theme_tufte(base_size = 16))
+```
+
+# Fixed interest rate
+
+```{r echo=FALSE}
+
+myplot1 <- function(start_saving, retire, xInit, r, save, logscale){
+  
+  years = retire - start_saving
+  r = r/100
+
+    
+  x <- vector(length = years)
+  x[1] <- xInit
+  
+  # calculate growth of money
+  for (t in seq(2, years)) {
+    x[t] <- x[t-1] + r * x[t-1] + save
+  }
+  
+  # build dataframe usable for plotting
+  df1 <- data.frame(age   = seq(start_saving, retire), 
+                    money = c(xInit, x))
+  
+  # plot
+  p1 <- ggplot(df1) +
+      aes(x = age, y = money) +
+      geom_line() +
+      labs(x = "Time (years)", y = "Money ($)") +
+      scale_y_continuous(labels = comma) 
+  
+  if (logscale) {
+    p1 <- p1 + scale_y_log10(labels = comma)
+  }
+  ggplotly(p1)
+}
+
+manipulateWidget(
+  
+  myplot1(start_saving, retire, xInit, r, save, logscale),
+  
+  start_saving = mwSlider(label = "Start saving:",  
+                min = 15, max = 40,   value = 25,  step = 1),
+  retire = mwSlider(label = "Retire at:",  
+                min = 40, max = 80,   value = 65,  step = 1),
+  xInit = mwSlider(label = "Initial sum:",  
+                min = 1, max = 10000,   value = 1000,  step = 100),
+  r  = mwSlider(label = "Interest rate (%):", 
+                min = 0, max = 10,  value = 3, step = 0.1),
+  save  = mwSlider(label = "Yearly savings:",  
+                min = 1, max = 10000,   value = 6000,  step = 100),
+  logscale = mwCheckbox(label = "Log scale:"),
+  .height = 500, .saveBtn = FALSE
+)
+```
+
+
+# Investment with uncertainty
+
+```{r echo=FALSE}
+
+myplot2 <- function(start_saving, retire, xInit, r, save_mean, save_sd, r_mean, r_sd, logscale){
+  
+  years = retire - start_saving
+  
+  save  = rnorm(years, mean = save_mean, sd = save_sd)
+  
+  r_mean = r_mean/100; r_sd = r_sd/100
+  r     = rnorm(years, mean = r_mean,    sd = r_sd)
+        
+  x <- vector(length = years)
+  x[1] <- xInit
+  
+  # calculate growth of money
+  for (t in seq(2, years)) {
+    x[t] <- x[t-1] + r[t-1] * x[t-1] + save[t-1]
+  }
+  
+  # build dataframe usable for plotting
+  df2 <- data.frame(age   = seq(start_saving, retire), 
+                    money = c(xInit, x))
+  
+  # plot
+  p2 <- ggplot(df2) +
+      aes(x = age, y = money) +
+      geom_line() +
+      labs(x = "Time (years)", y = "Money ($)") +
+      scale_y_continuous(labels = comma) 
+  
+  if (logscale) {
+    p2 <- p2 + scale_y_log10(labels = comma)
+  }
+  ggplotly(p2)
+}
+
+manipulateWidget(
+  
+  myplot2(start_saving, retire, xInit, r, save_mean, save_sd, r_mean, r_sd, logscale),
+  
+  start_saving = mwSlider(label = "Start saving:",  
+                min = 15, max = 40,   value = 25,  step = 1),
+  retire = mwSlider(label = "Retire at:",  
+                min = 40, max = 80,   value = 65,  step = 1),
+  xInit = mwSlider(label = "Initial sum:",  
+                min = 1, max = 10000,   value = 1000,  step = 100),
+  r_mean  = mwSlider(label = "Interest rate, mean (%):", 
+                min = 0, max = 10,  value = 3, step = 0.1),
+  r_sd  = mwSlider(label = "Interest rate, sd (%):", 
+                min = 0, max = 10,  value = 1, step = 0.1),
+  save_mean  = mwSlider(label = "Yearly savings, mean:",  
+                min = 1, max = 10000,   value = 6000,  step = 100),
+  save_sd  = mwSlider(label = "Yearly savings, sd:",  
+                min = 1, max = 10000,   value = 6000,  step = 100),
+  logscale = mwCheckbox(label = "Log scale:"),
+  .height = 500, .saveBtn = FALSE
+)
+```
+
+# Scenarios
+
+```{r echo=FALSE}
+plotSims <- function(start_saving, retire, runs, iM, iV, save_mean, save_sd, logscale) {
+
+  years = retire - start_saving
+  xInit <- 100
+  
+  # each column is another simulation, each row is a year
+  x <- matrix(0, nrow = years, ncol = runs)
+  for (k in seq(1,runs)) {
+    # generate normally distributed random interest rates over years
+    i <- rnorm(years, mean = iM, sd = iV)
+    
+    # generate normally distributed random savings over years
+    save  = rnorm(years, mean = save_mean, sd = save_sd)
+    
+    # the initial deposit
+    x[1,k] <- xInit
+    
+    # calculate growth of money
+    for (t in seq(2, years)) {
+      x[t,k] <- x[t-1,k] + i[t-1] * x[t-1,k] + save[t-1]
+    }
+  }
+  
+  # turn matrix into dataframe usable for plotting
+  df <- data.frame(t = seq(1,years), x) %>% 
+    gather(key = "simulation", value = "money", -t) 
+  
+  p <- df %>% 
+    ggplot() +
+      aes(x = t, y = money, group = simulation, alpha = 0.1) +
+      geom_line() +
+      labs(x = "Time (years)", y = "Money ($)") +
+      scale_y_continuous(labels = comma) 
+  
+  if (logscale) {
+    p <- p + scale_y_log10(labels = comma)
+  }
+  
+  ggplotly(p)
+}
+
+manipulateWidget(
+  plotSims(start_saving, retire, runs, iM, iV, save_mean, save_sd, logscale),
+  
+  start_saving = mwSlider(label = "Start saving:",  
+                min = 15, max = 40,   value = 25,  step = 1),
+  retire = mwSlider(label = "Retire at:",  
+                min = 40, max = 80,   value = 65,  step = 1),
+  runs = mwSlider(label = "# simulations:",  
+                   min = 10, max = 200,   value = 100,  step = 1),
+  iM = mwSlider(label = "Average interest rate:",
+                min = 0, max = 0.1,  value = 0.03,    step = 0.01),
+  iV = mwSlider(label = "Interest rate standard deviation:",
+                min = 0, max = 0.1,  value = 0.01,    step = 0.01),
+  save_mean  = mwSlider(label = "Yearly savings, mean:",  
+                min = 1, max = 10000,   value = 6000,  step = 100),
+  save_sd  = mwSlider(label = "Yearly savings, sd:",  
+                min = 1, max = 10000,   value = 6000,  step = 100),
+  logscale = mwCheckbox(label = "Log scale:"),
+  .height = 500, .saveBtn = FALSE
+  
+)
+```
+
